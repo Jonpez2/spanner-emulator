@@ -1,0 +1,15 @@
+java_binary(
+    name = "emulatortest",
+    srcs = ["EmulatorTest.java"],
+    data = ["@spanner-emulator-archive//:emulator_main"],
+    jvm_flags = ["-DPATH_TO_EMULATOR=$(location @spanner-emulator-archive//:emulator_main)"],
+    main_class = "emulatortest.EmulatorTest",
+    deps = [
+        "@maven//:com_google_api_gax",
+        "@maven//:com_google_api_gax_grpc",
+        "@maven//:com_google_api_grpc_proto_google_cloud_spanner_admin_database_v1",
+        "@maven//:com_google_api_grpc_proto_google_cloud_spanner_admin_instance_v1",
+        "@maven//:com_google_cloud_google_cloud_core",
+        "@maven//:com_google_cloud_google_cloud_spanner",
+    ],
+)
