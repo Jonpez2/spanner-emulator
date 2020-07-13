@@ -43,6 +43,13 @@ public class EmulatorTest {
             InstanceId instanceId = InstanceId.of(options.getProjectId(), "test-instance");
             InstanceAdminClient instanceAdminClient = options.getService().getInstanceAdminClient();
 
+            // Nothing returned here, so I have to create an instance
+            for( Instance i : instanceAdminClient.listInstances().iterateAll())  {
+                System.out.println(i.getDisplayName());
+            }
+
+            // I guess I have to find a config?
+            // Nope, this goes boom accessing a real project in GCP.
             InstanceConfig instanceConfig =
                 instanceAdminClient.listInstanceConfigs().iterateAll().iterator().next();
     
