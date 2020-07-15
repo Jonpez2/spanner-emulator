@@ -2,7 +2,7 @@ java_binary(
     name = "emulatortest",
     srcs = ["EmulatorTest.java"],
     data = ["@spanner-emulator-archive//:emulator_main"],
-    jvm_flags = ["-DPATH_TO_EMULATOR=$(location @spanner-emulator-archive//:emulator_main)"],
+    jvm_flags = ["-DPATH_TO_EMULATOR=$(location @spanner-emulator-archive//:emulator_main)", "-DSPANNER_EMULATOR_HOST=localhost:10007"],
     main_class = "emulatortest.EmulatorTest",
     deps = [
         "@maven//:com_google_api_gax",

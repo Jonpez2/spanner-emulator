@@ -11,11 +11,10 @@ exports_files(["emulator_main"])
     url = "https://storage.googleapis.com/cloud-spanner-emulator/releases/" + SPANNER_EMULATOR_VERSION + "/cloud-spanner-emulator_linux_amd64-" + SPANNER_EMULATOR_VERSION + ".tar.gz",
 )
 
-RULES_JVM_EXTERNAL_TAG = "3.2"
+RULES_JVM_EXTERNAL_TAG = "3.3"
 
 http_archive(
     name = "rules_jvm_external",
-    sha256 = "82262ff4223c5fda6fb7ff8bd63db8131b51b413d26eb49e3131037e79e324af",
     strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
     url = "https://github.com/bazelbuild/rules_jvm_external/archive/%s.zip" % RULES_JVM_EXTERNAL_TAG,
 )

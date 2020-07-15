@@ -1,84 +1,127 @@
 package emulatortest;
-
-import com.google.api.gax.longrunning.OperationFuture;
-import com.google.cloud.spanner.*;
+import com.google.cloud.spanner.Database;
+import com.google.cloud.spanner.DatabaseAdminClient;
+import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.Instance;
-import com.google.spanner.admin.instance.v1.CreateInstanceMetadata;
-import com.google.spanner.admin.instance.v1.CreateInstanceRequest;
+import com.google.cloud.spanner.InstanceAdminClient;
+import com.google.cloud.spanner.InstanceConfig;
+import com.google.cloud.spanner.InstanceConfigId;
+import com.google.cloud.spanner.InstanceId;
+import com.google.cloud.spanner.InstanceInfo;
+import com.google.cloud.spanner.Key;
+import com.google.cloud.spanner.Mutation;
+import com.google.cloud.spanner.SpannerException;
+import com.google.cloud.spanner.SpannerExceptionFactory;
+import com.google.cloud.spanner.SpannerOptions;
+import com.google.cloud.spanner.Struct;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Arrays;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-// import org.junit.Test;
 
 
 public class EmulatorTest {
-    private static Closeable startEmulator(Path emulator) throws IOException {
+    private static Process makeTheSpanner() throws IOException {
+        Path emulator = Paths.get(System.getProperty("PATH_TO_EMULATOR"));
         Set<PosixFilePermission> perms = Files.getPosixFilePermissions(emulator);
         perms.add(PosixFilePermission.OWNER_EXECUTE);
         Files.setPosixFilePermissions(emulator, perms);
 
-        Process proc = new ProcessBuilder()
+        return new ProcessBuilder()
             .command(emulator.toAbsolutePath().toString())
             .redirectOutput(ProcessBuilder.Redirect.INHERIT)
             .redirectError(ProcessBuilder.Redirect.INHERIT)
             .start();
-
-        return new Closeable() {
-            public void close() {
-                proc.destroy();
-            }
-        };
     }
 
-    // @Test
-    public void doTest() throws Exception {
-        try( Closeable emulator = startEmulator(Paths.get(System.getProperty("PATH_TO_EMULATOR")))) {
-            SpannerOptions options = SpannerOptions.newBuilder().setEmulatorHost(System.getenv("SPANNER_EMULATOR_HOST")).build();
+    public static class TestInstance implements Closeable {
+        private final SpannerOptions options;
+        private final Process spannerProc;
+        private final DatabaseClient dbClient;
 
-            InstanceId instanceId = InstanceId.of(options.getProjectId(), "test-instance");
-            InstanceAdminClient instanceAdminClient = options.getService().getInstanceAdminClient();
+        private static final String database = "test-db";
 
-            // Nothing returned here, so I have to create an instance
-            for( Instance i : instanceAdminClient.listInstances().iterateAll())  {
-                System.out.println(i.getDisplayName());
-            }
-
-            // I guess I have to find a config?
-            // Nope, this goes boom accessing a real project in GCP.
-            InstanceConfig instanceConfig =
-                instanceAdminClient.listInstanceConfigs().iterateAll().iterator().next();
-    
-            InstanceConfigId configId = instanceConfig.getId();
-            System.out.println("Creating instance using config " + configId);
-            InstanceInfo instance =
-                InstanceInfo.newBuilder(instanceId)
-                    .setNodeCount(1)
-                    .setDisplayName("Test instance")
-                    .setInstanceConfigId(configId)
-                    .build();
-
-            OperationFuture<Instance, CreateInstanceMetadata> op =
-                instanceAdminClient.createInstance(instance);
-            Instance createdInstance;
+        public TestInstance() {
             try {
-              createdInstance = op.get(30000L, TimeUnit.MILLISECONDS);
-            } catch (Exception e) {
-              throw SpannerExceptionFactory.newSpannerException(e);
+                this.spannerProc = makeTheSpanner();
+                System.out.println("Spanner proc - " + spannerProc.pid());
+                this.options = SpannerOptions.newBuilder()
+                    .setProjectId("NO_PROJECT_FOR_TEST")
+                    .setEmulatorHost("localhost:10007").build();
+
+                InstanceId instanceId = InstanceId.of(options.getProjectId(), "test-instance");
+                InstanceAdminClient instanceAdminClient = options.getService().getInstanceAdminClient();
+    
+                InstanceConfig instanceConfig =
+                    instanceAdminClient.listInstanceConfigs().iterateAll().iterator().next();
+        
+                InstanceConfigId configId = instanceConfig.getId();
+                System.out.println("Creating instance using config " + configId);
+                InstanceInfo instanceInfo =
+                    InstanceInfo.newBuilder(instanceId)
+                        .setNodeCount(1)
+                        .setDisplayName("Test instance")
+                        .setInstanceConfigId(configId)
+                        .build();
+    
+                Instance created = instanceAdminClient.createInstance(instanceInfo)
+                    .get(30000L, TimeUnit.MILLISECONDS);
+
+                DatabaseAdminClient dbAdminClient = options.getService().getDatabaseAdminClient();
+                Database db;
+                try {
+                        db = dbAdminClient.createDatabase(
+                            created.getId().getInstance(),
+                            database,
+                            Arrays.asList("CREATE TABLE Test ( AString STRING(255) ) PRIMARY KEY (AString)")
+                    ).get();
+                } catch (ExecutionException e) {
+                    // If the operation failed during execution, expose the cause.
+                    throw (SpannerException) e.getCause();
+                } catch (InterruptedException e) {
+                    // Throw when a thread is waiting, sleeping, or otherwise occupied,
+                    // and the thread is interrupted, either before or during the activity.
+                    throw SpannerExceptionFactory.propagateInterrupt(e);
+                }
+
+                dbClient = options.getService().getDatabaseClient(db.getId());
+            } catch( Exception e ) {
+                close();
+                throw new RuntimeException(e);
             }
-            Thread.sleep(20_000);       
+        }
+
+        @Override
+        public void close() {
+            try {
+                if(spannerProc != null)
+                    spannerProc.destroyForcibly().waitFor();
+            } catch(InterruptedException e) {
+                Thread.currentThread().interrupt(); 
+                throw new RuntimeException(e);
+            }
         }
     }
+    
+    // @Test
+    public void doTest() throws Exception {
+        try( TestInstance instance = new TestInstance()) {
+            Mutation mut = Mutation.newInsertBuilder("Test").set("AString").to("Hello").build();
+            instance.dbClient.readWriteTransaction()
+                .run(t -> {
+                    t.buffer(mut);
+                    return null;
+                });
 
-    public static SpannerOptions spannerOptions() {
-        return SpannerOptions.newBuilder().setProjectId("sky-did-82840")
-                .setSessionPoolOption(SessionPoolOptions.newBuilder()
-                        .build())
-                .build();
+            Struct row = instance.dbClient.singleUseReadOnlyTransaction().readRow("Test", Key.of("Hello"), Arrays.asList("AString"));
+            System.out.println(row);
+        }
     }
 
     public static void main(String[] args) throws Exception {
